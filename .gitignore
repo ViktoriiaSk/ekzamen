@@ -1,0 +1,15 @@
+# Секрети та локальні змінні
+*.tfvars
+*.tfvars.json
+secrets.sh
+.terraform.tfstate.lock.info
+
+# Тимчасова папка Terraform (бінарники)
+.terraform/
+
+# Локальні файли стану (вони нам не треба, бо стан у хмарі)
+terraform.tfstate
+terraform.tfstate.backup
+
+# Локальні плани
+tfplan
