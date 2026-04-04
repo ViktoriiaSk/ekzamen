@@ -47,6 +47,6 @@ resource "digitalocean_firewall" "firewall" {
 }
 
 resource "digitalocean_spaces_bucket" "bucket" {
-  name   = "sokhanska-bucket"
+  name   = "sokhanska-bucket1"
   region = "fra1"
 }
