@@ -11,7 +11,7 @@ terraform {
       s3 = "https://fra1.digitaloceanspaces.com"
     }
     region                      = "us-east-1"
-    bucket                      = "sokhanska-bucket"
+    bucket                      = "sokhanska-tfstate"
     key                         = "terraform.tfstate"
     skip_credentials_validation = true
     skip_metadata_api_check     = true
