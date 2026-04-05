@@ -1,33 +1,17 @@
-- name: Install Docker dependencies
+- name: Install networking dependencies and containerd
   apt:
-    name: [apt-transport-https, ca-certificates, curl, software-properties-common]
-    update_cache: yes
-
-- name: Install Docker
-  apt:
-    name: docker.io
-    state: present
-
-- name: Download Minikube binary
-  get_url:
-    url: https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-    dest: /usr/local/bin/minikube
-    mode: '0755'
-
-- name: Install conntrack
-  apt:
-    name: conntrack
+    name:
+      - kubernetes-cni
+      - socat
+      - containerd
+      - conntrack
+      - cri-tools
     state: present
     update_cache: yes
 
-- name: Delete existing minikube cluster to reset memory
-  command: minikube delete
+- name: Force delete old minikube configs
+  shell: rm -rf /root/.minikube /root/.kube /etc/kubernetes /var/lib/minikube
   ignore_errors: yes
 
-- name: Ensure containerd is installed
-  apt:
-    name: containerd
-    state: present
-
-- name: Start Minikube with containerd
-  command: minikube start --driver=none --force --container-runtime=containerd
+- name: Start Minikube
+  command: minikube start --driver=none --force --container-runtime=containerd --memory=2048mb --extra-config=kubeadm.ignore-preflight-errors=NumCPU,Mem --v=5
