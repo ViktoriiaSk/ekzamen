@@ -20,5 +20,14 @@
     state: present
     update_cache: yes
 
-- name: Start Minikube
-  command: minikube start --driver=none
+- name: Delete existing minikube cluster to reset memory
+  command: minikube delete
+  ignore_errors: yes
+
+- name: Ensure containerd is installed
+  apt:
+    name: containerd
+    state: present
+
+- name: Start Minikube with containerd
+  command: minikube start --driver=none --force --container-runtime=containerd
