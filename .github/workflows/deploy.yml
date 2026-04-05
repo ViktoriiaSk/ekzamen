@@ -162,6 +162,7 @@ jobs:
               --set serviceAccount.create=false \
               --set autoscaling.enabled=false \
               --set ingress.enabled=false \
+              --set httpRoute.enabled=false \
               --dry-run \
               --debug"
 
@@ -193,6 +194,7 @@ jobs:
               --set serviceAccount.create=false \
               --set autoscaling.enabled=false \
               --set ingress.enabled=false \
+              --set httpRoute.enabled=false \
               --wait \
               --timeout 120s"
 
