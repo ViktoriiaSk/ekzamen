@@ -180,6 +180,15 @@ jobs:
               --docker-password=${{ secrets.DOCKERHUB_TOKEN }} \
               --dry-run=client -o yaml | kubectl apply -f -"
 
+          # Cleanup old kubectl-based deployments/services from default namespace that may block the port
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+            "kubectl delete deployment app-develop app-1.0.0 --namespace default --ignore-not-found && \
+             kubectl delete svc svc-develop svc-1.0.0 --namespace default --ignore-not-found"
+
+          # Delete existing service to free the nodePort before Helm redeploy
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+            "kubectl delete svc django-hello-world-svc -n ${{ env.NAMESPACE }} --ignore-not-found"
+
           # Deploy/upgrade with Helm
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
             "helm upgrade --install ${{ env.RELEASE_NAME }} \
@@ -198,10 +207,10 @@ jobs:
               --wait \
               --timeout 120s"
 
-          # Patch NodePort to exact port value (Helm chart doesn't support nodePort field natively)
+          # Patch NodePort to exact port value
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
             "kubectl patch svc django-hello-world-svc -n ${{ env.NAMESPACE }} --type='json' \
-              -p '[{\"op\":\"replace\",\"path\":\"/spec/ports/0/nodePort\",\"value\":${{ env.PORT }}}]'"
+              -p '[{\"op\":\"replace\",\"path\":\"/spec/ports/0/nodePort\",\"value\":${{ env.PORT }}}]' || true"
 
           # Verify
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
