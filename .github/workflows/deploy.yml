@@ -1,4 +1,4 @@
-name: "Terraform Deploy"
+name: "Terraform & Ansible Deploy"
 
 on:
   push:
@@ -12,7 +12,6 @@ jobs:
       TF_VAR_pvt_key: ${{ secrets.SSH_PRIVATE_KEY }}
       TF_VAR_spaces_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
       TF_VAR_spaces_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
 
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -32,3 +31,37 @@ jobs:
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
+
+      # ANSIBLE 
+
+      - name: Prepare SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Install Ansible
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+
+      - name: Run Ansible Pre-check (Dry Run)
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          # Вимога: перевірка правильності БЕЗ встановлення (--check)
+          ansible-playbook -i ansible/inventory.ini ansible/playbook.yml \
+          --extra-vars "target_ip=${{ secrets.VM_IP }}" \
+          --private-key ~/.ssh/id_rsa \
+          -u root \
+          --check
+
+      - name: Run Ansible Real Installation
+        if: success() 
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook -i ansible/inventory.ini ansible/playbook.yml \
+          --extra-vars "target_ip=${{ secrets.VM_IP }}" \
+          --private-key ~/.ssh/id_rsa \
+          -u root

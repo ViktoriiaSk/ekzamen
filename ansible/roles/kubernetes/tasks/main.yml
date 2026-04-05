@@ -1,0 +1,31 @@
+- name: Install dependencies for K8s tools
+  apt:
+    name: [apt-transport-https, ca-certificates, curl, gnupg]
+    update_cache: yes
+
+- name: Create directory for apt keyrings
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download Google Cloud public signing key
+  get_url:
+    url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
+    dest: /tmp/k8s.key
+    mode: '0644'
+
+- name: Add Kubernetes apt repository
+  shell: cat /tmp/k8s.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  args:
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Add Kubernetes repository to sources list
+  apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+    state: present
+
+- name: Install kubectl
+  apt:
+    name: kubectl
+    update_cache: yes
