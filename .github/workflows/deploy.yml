@@ -33,7 +33,6 @@ jobs:
         run: terraform apply -auto-approve
 
       # ANSIBLE 
-
       - name: Prepare SSH Key
         run: |
           mkdir -p ~/.ssh
@@ -45,23 +44,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ansible
 
-      - name: Run Ansible Pre-check (Dry Run)
+      - name: Run Ansible Installation
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
-          # Вимога: перевірка правильності БЕЗ встановлення (--check)
-          ansible-playbook -i ansible/inventory.ini ansible/playbook.yml \
-          --extra-vars "target_ip=${{ secrets.VM_IP }}" \
+          ansible-playbook -i "${{ secrets.VM_IP }}," ansible/playbook.yml \
           --private-key ~/.ssh/id_rsa \
           -u root \
-          --check
-
-      - name: Run Ansible Real Installation
-        if: success() 
-        env:
-          ANSIBLE_HOST_KEY_CHECKING: "False"
-        run: |
-          ansible-playbook -i ansible/inventory.ini ansible/playbook.yml \
-          --extra-vars "target_ip=${{ secrets.VM_IP }}" \
-          --private-key ~/.ssh/id_rsa \
-          -u root
+          --extra-vars "target_ip=${{ secrets.VM_IP }}"
