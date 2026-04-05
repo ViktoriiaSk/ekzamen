@@ -16,8 +16,5 @@
 
 - name: Start Minikube with Proxy
   command: >
-    minikube start --driver=docker 
-    --docker-env HTTP_PROXY={{ http_proxy | default('') }}
-    --docker-env HTTPS_PROXY={{ https_proxy | default('') }}
-    --docker-env NO_PROXY=localhost,127.0.0.1,10.96.0.0/12
+    minikube start --driver=none
   ignore_errors: yes
