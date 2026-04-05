@@ -3,6 +3,6 @@
   become: yes
   roles:
     - check_env
+    - kubernetes
     - minikube
     - helm
-    - kubernetes

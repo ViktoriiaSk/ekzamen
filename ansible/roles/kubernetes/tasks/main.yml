@@ -8,6 +8,7 @@
       - conntrack
       - socat
       - ebtables
+      - cri-tools
     update_cache: yes
 
 - name: Create directory for apt keyrings
