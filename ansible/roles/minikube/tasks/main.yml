@@ -2,16 +2,28 @@
   apt:
     name:
       - kubernetes-cni
+      - containernetworking-plugins
       - socat
       - containerd
       - conntrack
-      - cri-tools
     state: present
     update_cache: yes
 
-- name: Force delete old minikube configs
+- name: Create containerd config directory and default config
+  shell: |
+    mkdir -p /etc/containerd
+    containerd config default > /etc/containerd/config.toml
+    systemctl restart containerd
+
+- name: Create CNI directory and link plugins
+  shell: |
+    mkdir -p /opt/cni/bin
+    cp /usr/lib/cni/* /opt/cni/bin/ || true
+    ln -sf /usr/lib/cni/* /opt/cni/bin/ || true
+
+- name: Hard reset minikube
   shell: rm -rf /root/.minikube /root/.kube /etc/kubernetes /var/lib/minikube
   ignore_errors: yes
 
 - name: Start Minikube
-  command: minikube start --driver=none --force --container-runtime=containerd --memory=2048mb --extra-config=kubeadm.ignore-preflight-errors=NumCPU,Mem --v=5
+  command: minikube start --driver=none --force --container-runtime=containerd
