@@ -14,7 +14,11 @@
     dest: /usr/local/bin/minikube
     mode: '0755'
 
-- name: Start Minikube with Proxy
-  command: >
-    minikube start --driver=none
-  ignore_errors: yes
+- name: Install conntrack
+  apt:
+    name: conntrack
+    state: present
+    update_cache: yes
+
+- name: Start Minikube
+  command: minikube start --driver=none

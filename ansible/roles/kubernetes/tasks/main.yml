@@ -1,6 +1,13 @@
 - name: Install dependencies for K8s tools
   apt:
-    name: [apt-transport-https, ca-certificates, curl, gnupg]
+    name: 
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - conntrack
+      - socat
+      - ebtables
     update_cache: yes
 
 - name: Create directory for apt keyrings
