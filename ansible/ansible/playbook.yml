@@ -1,0 +1,9 @@
+- name: Setup Kubernetes Environment
+  hosts: all
+  become: yes
+  vars:
+    http_proxy: "http://proxy.example.com:8080" 
+  roles:
+    - check_env
+    - minikube
+    - helm

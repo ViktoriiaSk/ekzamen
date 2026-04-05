@@ -1,0 +1,11 @@
+- name: Verify CPU count
+  assert:
+    that:
+      - ansible_processor_vcpus >= 2
+    fail_msg: "Потрібно мінімум 2 ядра для Minikube!"
+
+- name: Verify RAM size
+  assert:
+    that:
+      - ansible_memtotal_mb >= 3800
+    fail_msg: "Недостатньо оперативної пам'яті!"
