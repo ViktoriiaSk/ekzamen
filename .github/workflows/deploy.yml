@@ -48,8 +48,6 @@ jobs:
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
-          # ВАЖЛИВО: Переконайтеся, що в змінній secrets.VM_IP лежить 134.122.79.221
-          # Кома після змінної обов'язкова!
           ansible-playbook -i "${{ secrets.VM_IP }}," ansible/playbook.yml \
           --private-key ~/.ssh/id_rsa \
           -u root \
