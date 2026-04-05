@@ -25,5 +25,10 @@
   shell: rm -rf /root/.minikube /root/.kube /etc/kubernetes /var/lib/minikube
   ignore_errors: yes
 
-- name: Start Minikube
-  command: minikube start --driver=none --force --container-runtime=containerd
+- name: Start Minikube with custom port range
+  command: >
+    minikube start 
+    --driver=none 
+    --force 
+    --container-runtime=containerd 
+    --extra-config=apiserver.service-node-port-range=1-65535
