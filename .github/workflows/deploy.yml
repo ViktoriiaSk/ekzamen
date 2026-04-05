@@ -4,10 +4,31 @@ on:
   push:
     branches: [ "main", "develop" ]
     tags: [ "1.0.0" ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy (dev / release)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - release
+      rollback:
+        description: "Rollback to previous revision (yes / no)"
+        required: false
+        default: "no"
+        type: choice
+        options:
+          - "no"
+          - "yes"
 
 jobs:
+  # ──────────────────────────────────────────────
+  # JOB 1: Infrastructure provisioning (main branch only)
+  # ──────────────────────────────────────────────
   infrastructure:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Infrastructure Code
@@ -20,6 +41,8 @@ jobs:
         env:
           TF_VAR_do_token: ${{ secrets.DO_TOKEN }}
           TF_VAR_pvt_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          TF_VAR_spaces_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          TF_VAR_spaces_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
@@ -35,26 +58,62 @@ jobs:
           ansible-playbook -i "${{ secrets.VM_IP }}," ansible/playbook.yml \
           --private-key ~/.ssh/id_rsa -u root --extra-vars "target_ip=${{ secrets.VM_IP }}"
 
+  # ──────────────────────────────────────────────
+  # JOB 2: Build & Deploy Application
+  # ──────────────────────────────────────────────
   deploy-app:
-    if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/1.0.0')
+    if: >
+      github.ref == 'refs/heads/develop' ||
+      startsWith(github.ref, 'refs/tags/1.0.0') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      # ── Determine environment parameters ──
       - name: Set Env Variables
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          # If triggered manually
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV="${{ github.event.inputs.environment }}"
+            if [[ "$ENV" == "release" ]]; then
+              echo "TAG=1.0.0" >> $GITHUB_ENV
+              echo "PORT=8003" >> $GITHUB_ENV
+              echo "RELEASE_NAME=app-release" >> $GITHUB_ENV
+              echo "VALUES_FILE=values-prod.yaml" >> $GITHUB_ENV
+              echo "APP_REF=1.0.0" >> $GITHUB_ENV
+              echo "NAMESPACE=release" >> $GITHUB_ENV
+            else
+              echo "TAG=develop" >> $GITHUB_ENV
+              echo "PORT=8002" >> $GITHUB_ENV
+              echo "RELEASE_NAME=app-dev" >> $GITHUB_ENV
+              echo "VALUES_FILE=values-dev.yaml" >> $GITHUB_ENV
+              echo "APP_REF=develop" >> $GITHUB_ENV
+              echo "NAMESPACE=dev" >> $GITHUB_ENV
+            fi
+          # If triggered by push
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "TAG=develop" >> $GITHUB_ENV
             echo "PORT=8002" >> $GITHUB_ENV
+            echo "RELEASE_NAME=app-dev" >> $GITHUB_ENV
+            echo "VALUES_FILE=values-dev.yaml" >> $GITHUB_ENV
+            echo "APP_REF=develop" >> $GITHUB_ENV
+            echo "NAMESPACE=dev" >> $GITHUB_ENV
           else
             echo "TAG=1.0.0" >> $GITHUB_ENV
             echo "PORT=8003" >> $GITHUB_ENV
+            echo "RELEASE_NAME=app-release" >> $GITHUB_ENV
+            echo "VALUES_FILE=values-prod.yaml" >> $GITHUB_ENV
+            echo "APP_REF=1.0.0" >> $GITHUB_ENV
+            echo "NAMESPACE=release" >> $GITHUB_ENV
           fi
 
+      # ── Checkout app source code ──
       - name: Checkout Application Code
         uses: actions/checkout@v4
         with:
           repository: 'YulianSalo/devops-exam-pt2'
-          ref: ${{ env.TAG }}
+          ref: ${{ env.APP_REF }}
 
+      # ── Docker: Build & Push ──
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -66,17 +125,84 @@ jobs:
           docker build -t "${{ secrets.DOCKERHUB_USERNAME }}/devops-exam:${{ env.TAG }}" .
           docker push "${{ secrets.DOCKERHUB_USERNAME }}/devops-exam:${{ env.TAG }}"
 
-      - name: Deploy to Kubernetes
+      # ── SSH setup ──
+      - name: Setup SSH
         run: |
-          mkdir -p ~/.ssh && echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
-          
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
-          "kubectl create deployment check-${{ env.TAG }} --image=${{ secrets.DOCKERHUB_USERNAME }}/devops-exam:${{ env.TAG }} --dry-run=client"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
 
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} << EOF
-            kubectl delete deployment app-${{ env.TAG }} --ignore-not-found
-            kubectl delete svc svc-${{ env.TAG }} --ignore-not-found
-            kubectl create deployment app-${{ env.TAG }} --image=${{ secrets.DOCKERHUB_USERNAME }}/devops-exam:${{ env.TAG }}
-            kubectl expose deployment app-${{ env.TAG }} --type=NodePort --port=80 --target-port=8080 --name=svc-${{ env.TAG }}
-            kubectl patch svc svc-${{ env.TAG }} --type='json' -p '[{"op":"replace","path":"/spec/ports/0/nodePort","value":${{ env.PORT }}}]'
-          EOF
+      # ── Rollback (if requested) ──
+      - name: Rollback to previous revision
+        if: github.event.inputs.rollback == 'yes'
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+            "kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f - && \
+             helm rollback ${{ env.RELEASE_NAME }} 0 --namespace ${{ env.NAMESPACE }} && echo 'Rollback successful!'"
+          echo "::notice::Rollback completed for ${{ env.RELEASE_NAME }}"
+
+      # ── Dry-run validation (skip on rollback) ──
+      - name: Dry-run validation (pre-deploy check)
+        if: github.event.inputs.rollback != 'yes'
+        run: |
+          # Copy app source + helm chart to the VM
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -r . root@${{ secrets.VM_IP }}:/tmp/app-${{ env.TAG }}
+
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+            "kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f - && \
+             helm upgrade --install ${{ env.RELEASE_NAME }} \
+              /tmp/app-${{ env.TAG }}/helm-charts-hello-world \
+              -f /tmp/app-${{ env.TAG }}/helm-charts-hello-world/${{ env.VALUES_FILE }} \
+              --namespace ${{ env.NAMESPACE }} \
+              --set image.repository=${{ secrets.DOCKERHUB_USERNAME }}/devops-exam \
+              --set image.tag=${{ env.TAG }} \
+              --set image.pullSecret=regcred \
+              --set service.type=NodePort \
+              --set service.port=${{ env.PORT }} \
+              --dry-run \
+              --debug"
+
+      # ── Deploy with Helm (skip on rollback) ──
+      - name: Deploy to Kubernetes via Helm
+        if: github.event.inputs.rollback != 'yes'
+        run: |
+          # Create docker registry secret
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+            "kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f - && \
+             kubectl create secret docker-registry regcred \
+              --namespace ${{ env.NAMESPACE }} \
+              --docker-server=https://index.docker.io/v1/ \
+              --docker-username=${{ secrets.DOCKERHUB_USERNAME }} \
+              --docker-password=${{ secrets.DOCKERHUB_TOKEN }} \
+              --dry-run=client -o yaml | kubectl apply -f -"
+
+          # Deploy/upgrade with Helm
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+            "helm upgrade --install ${{ env.RELEASE_NAME }} \
+              /tmp/app-${{ env.TAG }}/helm-charts-hello-world \
+              -f /tmp/app-${{ env.TAG }}/helm-charts-hello-world/${{ env.VALUES_FILE }} \
+              --namespace ${{ env.NAMESPACE }} \
+              --set image.repository=${{ secrets.DOCKERHUB_USERNAME }}/devops-exam \
+              --set image.tag=${{ env.TAG }} \
+              --set image.pullSecret=regcred \
+              --set service.type=NodePort \
+              --set service.port=${{ env.PORT }} \
+              --wait \
+              --timeout 120s"
+
+          # Patch NodePort to exact port value (Helm chart doesn't support nodePort field natively)
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+            "kubectl patch svc django-hello-world-svc -n ${{ env.NAMESPACE }} --type='json' \
+              -p '[{\"op\":\"replace\",\"path\":\"/spec/ports/0/nodePort\",\"value\":${{ env.PORT }}}]'"
+
+          # Verify
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+            "echo '=== Pods ===' && kubectl get pods -n ${{ env.NAMESPACE }} -l app=django-hello-world && echo '=== Services ===' && kubectl get svc -n ${{ env.NAMESPACE }}"
+
+      # ── Verify application is accessible ──
+      - name: Verify deployment
+        run: |
+          echo "Waiting 15s for pods to become ready..."
+          sleep 15
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+            "curl -sf http://localhost:${{ env.PORT }}/ && echo ' ✅ App is accessible on port ${{ env.PORT }}' || echo ' ❌ App not yet ready on port ${{ env.PORT }}'"
