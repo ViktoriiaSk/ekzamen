@@ -1,21 +1,14 @@
-name: "Terraform & Ansible Deploy"
+name: "CI/CD Pipeline: Infrastructure & App Deploy"
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
+    tags: [ "1.0.0" ]
 
 jobs:
-  terraform:
+  infrastructure:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    env:
-      TF_VAR_do_token: ${{ secrets.DO_TOKEN }}
-      TF_VAR_pvt_key: ${{ secrets.SSH_PRIVATE_KEY }}
-      TF_VAR_spaces_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      TF_VAR_spaces_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,32 +16,64 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Plan
-        run: terraform plan -input=false
-
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
-
-      # ANSIBLE 
-      - name: Prepare SSH Key
+      - name: Terraform Init & Apply
+        env:
+          TF_VAR_do_token: ${{ secrets.DO_TOKEN }}
+          TF_VAR_pvt_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
+          terraform init
+          terraform apply -auto-approve
 
-      - name: Install Ansible
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ansible
-
-      - name: Run Ansible Installation
+      - name: Ansible Install Components
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
+          mkdir -p ~/.ssh && echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+          sudo apt-get update && sudo apt-get install -y ansible
           ansible-playbook -i "${{ secrets.VM_IP }}," ansible/playbook.yml \
-          --private-key ~/.ssh/id_rsa \
-          -u root \
-          --extra-vars "target_ip=${{ secrets.VM_IP }}"
+          --private-key ~/.ssh/id_rsa -u root --extra-vars "target_ip=${{ secrets.VM_IP }}"
+
+  deploy-app:
+    if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/1.0.0')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set Env Variables
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "TAG=develop" >> $GITHUB_ENV
+            echo "PORT=8002" >> $GITHUB_ENV
+          else
+            echo "TAG=1.0.0" >> $GITHUB_ENV
+            echo "PORT=8003" >> $GITHUB_ENV
+          fi
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/devops-exam:${{ env.TAG }} .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/devops-exam:${{ env.TAG }}
+
+      - name: Deploy to Kubernetes
+        run: |
+          mkdir -p ~/.ssh && echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+          
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} \
+          "kubectl create deployment check-${{ env.TAG }} --image=${{ secrets.DOCKERHUB_USERNAME }}/devops-exam:${{ env.TAG }} --dry-run=client"
+
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VM_IP }} << EOF
+            kubectl delete deployment app-${{ env.TAG }} --ignore-not-found
+            kubectl delete svc svc-${{ env.TAG }} --ignore-not-found
+            kubectl create deployment app-${{ env.TAG }} --image=${{ secrets.DOCKERHUB_USERNAME }}/devops-exam:${{ env.TAG }}
+            kubectl expose deployment app-${{ env.TAG }} --type=NodePort --port=80 --target-port=8080 --name=svc-${{ env.TAG }}
+            kubectl patch svc svc-${{ env.TAG }} --type='json' -p '[{"op":"replace","path":"/spec/ports/0/nodePort","value":${{ env.PORT }}}]'
+          EOF
