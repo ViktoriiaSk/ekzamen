@@ -159,6 +159,9 @@ jobs:
               --set image.pullSecret=regcred \
               --set service.type=NodePort \
               --set service.port=${{ env.PORT }} \
+              --set serviceAccount.create=false \
+              --set autoscaling.enabled=false \
+              --set ingress.enabled=false \
               --dry-run \
               --debug"
 
@@ -187,6 +190,9 @@ jobs:
               --set image.pullSecret=regcred \
               --set service.type=NodePort \
               --set service.port=${{ env.PORT }} \
+              --set serviceAccount.create=false \
+              --set autoscaling.enabled=false \
+              --set ingress.enabled=false \
               --wait \
               --timeout 120s"
 
